@@ -3,6 +3,7 @@ import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let controller = Controller()
+    private let windowCentering = WindowCentering()
     private var statusItem: NSStatusItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -13,6 +14,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         controller.onChange = { [weak self] in self?.updateIcon() }
         controller.start()
         updateIcon()
+        do {
+            try windowCentering.start()
+        } catch {
+            showAlert("无法开启窗口居中", error)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -52,6 +58,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(threshold)
         menu.addItem(.separator())
 
+        menu.addItem(item("按 ⌃⌥C 居中当前窗口", #selector(toggleWindowCentering), checked: windowCentering.enabled))
+        if windowCentering.needsPermission {
+            menu.addItem(item("授权辅助功能…", #selector(openAccessibilitySettings), checked: false))
+        }
+        menu.addItem(.separator())
+
         menu.addItem(item("开机自动启动", #selector(toggleLaunchAtLogin), checked: SMAppService.mainApp.status == .enabled))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -80,6 +92,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func setThreshold(_ sender: NSMenuItem) {
         controller.batteryThreshold = sender.tag
+    }
+
+    @objc private func toggleWindowCentering() {
+        do {
+            try windowCentering.setEnabled(!windowCentering.enabled)
+        } catch {
+            showAlert("无法开启窗口居中", error)
+        }
+    }
+
+    @objc private func openAccessibilitySettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 
     @objc private func toggleLaunchAtLogin() {
