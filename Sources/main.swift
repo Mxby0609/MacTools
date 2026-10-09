@@ -2,7 +2,7 @@ import AppKit
 import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
-    private let lidAwake = LidAwake()
+    private let keepAwake = KeepAwake()
     private let windowCentering = WindowCentering()
     private var statusItem: NSStatusItem!
 
@@ -11,19 +11,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
-        lidAwake.onChange = { [weak self] in self?.updateIcon() }
-        lidAwake.start()
+        keepAwake.onChange = { [weak self] in self?.updateIcon() }
+        keepAwake.start()
         updateIcon()
         windowCentering.start()
     }
 
     func applicationWillTerminate(_: Notification) {
-        lidAwake.shutdown()
+        keepAwake.shutdown()
     }
 
     private func updateIcon() {
-        let name = lidAwake.lastError != nil ? "exclamationmark.triangle"
-            : lidAwake.enabled ? "cup.and.saucer.fill" : "cup.and.saucer"
+        let name = keepAwake.lastError != nil ? "exclamationmark.triangle"
+            : keepAwake.enabled ? "cup.and.saucer.fill" : "cup.and.saucer"
         let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
         let image = NSImage(systemSymbolName: name, accessibilityDescription: appName)
         image?.isTemplate = true
@@ -35,22 +35,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
 
-        menu.addItem(note(lidAwake.statusText))
+        menu.addItem(note(keepAwake.statusText))
         menu.addItem(.separator())
 
-        menu.addItem(item("合盖继续运行", #selector(toggleLidAwake), checked: lidAwake.enabled))
-        menu.addItem(item("用电池时也运行", #selector(toggleBattery), checked: lidAwake.allowOnBattery))
-
-        let threshold = NSMenuItem(title: "电量低于 \(lidAwake.batteryThreshold)% 时允许睡眠", action: nil, keyEquivalent: "")
-        threshold.isEnabled = lidAwake.allowOnBattery
-        let submenu = NSMenu()
-        for percent in [10, 20, 30, 40, 50] {
-            let option = item("\(percent)%", #selector(setThreshold(_:)), checked: percent == lidAwake.batteryThreshold)
-            option.tag = percent
-            submenu.addItem(option)
-        }
-        threshold.submenu = submenu
-        menu.addItem(threshold)
+        menu.addItem(item("合盖继续运行", #selector(toggleLid), checked: keepAwake.lidEnabled))
+        menu.addItem(item("无人操作时调暗并继续运行", #selector(toggleIdle), checked: keepAwake.idleEnabled))
+        menu.addItem(choices(
+            "无人操作 \(durationText(keepAwake.idleSeconds))后调暗",
+            enabled: keepAwake.idleEnabled,
+            options: [5, 60, 120, 300, 600, 1800].map { ($0 == 5 ? "5 秒（测试用）" : durationText($0), $0) },
+            selected: keepAwake.idleSeconds,
+            #selector(setIdleSeconds(_:))
+        ))
+        menu.addItem(item("用电池时也运行", #selector(toggleBattery), checked: keepAwake.allowOnBattery))
+        menu.addItem(choices(
+            "电量低于 \(keepAwake.batteryThreshold)% 时允许睡眠",
+            enabled: keepAwake.allowOnBattery,
+            options: [10, 20, 30, 40, 50].map { ("\($0)%", $0) },
+            selected: keepAwake.batteryThreshold,
+            #selector(setThreshold(_:))
+        ))
         menu.addItem(.separator())
 
         menu.addItem(item(
@@ -85,20 +89,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
-    @objc private func toggleLidAwake() {
+    /// 带子菜单的一行，子菜单是一组单选项，各项的数值放在 tag 里。
+    private func choices(
+        _ title: String,
+        enabled: Bool,
+        options: [(title: String, value: Int)],
+        selected: Int,
+        _ action: Selector
+    ) -> NSMenuItem {
+        let parent = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        parent.isEnabled = enabled
+        let submenu = NSMenu()
+        for option in options {
+            let child = item(option.title, action, checked: option.value == selected)
+            child.tag = option.value
+            submenu.addItem(child)
+        }
+        parent.submenu = submenu
+        return parent
+    }
+
+    private func durationText(_ seconds: Int) -> String {
+        seconds < 60 ? "\(seconds) 秒" : "\(seconds / 60) 分钟"
+    }
+
+    @objc private func toggleLid() {
         do {
-            try lidAwake.setEnabled(!lidAwake.enabled)
+            try keepAwake.setLidEnabled(!keepAwake.lidEnabled)
         } catch {
             showAlert("无法开启合盖运行", error)
         }
     }
 
+    @objc private func toggleIdle() {
+        keepAwake.idleEnabled.toggle()
+    }
+
+    @objc private func setIdleSeconds(_ sender: NSMenuItem) {
+        keepAwake.idleSeconds = sender.tag
+    }
+
     @objc private func toggleBattery() {
-        lidAwake.allowOnBattery.toggle()
+        keepAwake.allowOnBattery.toggle()
     }
 
     @objc private func setThreshold(_ sender: NSMenuItem) {
-        lidAwake.batteryThreshold = sender.tag
+        keepAwake.batteryThreshold = sender.tag
     }
 
     @objc private func toggleWindowCentering() {

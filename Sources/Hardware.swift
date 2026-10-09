@@ -5,7 +5,7 @@ import IOKit.ps
 import IOKit.pwr_mgt
 import os
 
-private let log = Log.lidAwake
+private let log = Log.keepAwake
 
 // MARK: - 合盖状态
 
@@ -94,6 +94,100 @@ final class PowerMonitor {
             return
         }
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .defaultMode)
+    }
+}
+
+// MARK: - 无人操作
+
+/// 无人操作检测：定时查看距离上次键盘、鼠标操作过了多久，“有人操作”和“无人操作”互相切换时发出通知。
+final class IdleMonitor {
+    /// CGEventTypes.h 里的 kCGAnyInputEventType，表示任意输入事件；Swift 不导入这个宏。
+    private static let anyInputEvent = CGEventType(rawValue: ~0)!
+
+    var onChange: (() -> Void)?
+    private(set) var isIdle = false
+    private var threshold: TimeInterval?
+    private var watchStart = Date()
+    private var timer: Timer?
+
+    /// 开始检测，传 nil 则停止。传入的时长和正在用的相同时什么都不做，可以反复调用。
+    func watch(threshold: TimeInterval?) {
+        guard threshold != self.threshold else { return }
+        self.threshold = threshold
+        timer?.invalidate()
+        timer = nil
+        isIdle = false
+        guard let threshold else { return }
+        watchStart = Date()
+        schedule(after: threshold)
+    }
+
+    private func schedule(after delay: TimeInterval) {
+        timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in self?.check() }
+    }
+
+    private func check() {
+        guard let threshold else { return }
+        // 远程桌面发来的操作也算，所以用 combinedSessionState。
+        let sinceInput = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: Self.anyInputEvent)
+        let quiet = min(sinceInput, Date().timeIntervalSince(watchStart))
+        // 别的软件要求屏幕保持点亮时（放视频、开视频会议）不进入无人操作状态，免得看到一半屏幕变黑。
+        let idleNow = quiet >= threshold && (isIdle || !DisplaySleepBlocker.heldByOthers)
+
+        // 无人操作期间每 0.25 秒看一次，有操作就能马上恢复；其余时间等到可能满足条件的时刻再看。
+        if idleNow {
+            schedule(after: 0.25)
+        } else {
+            schedule(after: quiet < threshold ? threshold - quiet : 5)
+        }
+        // 先安排好下一次再通知：收到通知的一方可能会调用 watch 停止检测。
+        if idleNow != isIdle {
+            isIdle = idleNow
+            log.notice("无人操作状态变化：idle=\(idleNow)")
+            onChange?()
+        }
+    }
+}
+
+// MARK: - 防止熄屏
+
+/// 向系统声明“无人操作时不要熄屏、不要睡眠”，效果和 `caffeinate -d` 相同。软件退出时系统会自动撤销。
+final class DisplaySleepBlocker {
+    private var assertion: IOPMAssertionID?
+
+    func setActive(_ active: Bool) {
+        if active, assertion == nil {
+            var id = IOPMAssertionID(0)
+            let result = IOPMAssertionCreateWithName(
+                kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+                IOPMAssertionLevel(kIOPMAssertionLevelOn),
+                "无人操作时保持运行" as CFString,
+                &id
+            )
+            if result == kIOReturnSuccess {
+                assertion = id
+            } else {
+                log.error("声明防止熄屏失败：\(result)")
+            }
+        } else if !active, let id = assertion {
+            IOPMAssertionRelease(id)
+            assertion = nil
+        }
+    }
+
+    /// 别的软件是否正要求屏幕保持点亮。
+    static var heldByOthers: Bool {
+        var unmanaged: Unmanaged<CFDictionary>?
+        guard IOPMCopyAssertionsByProcess(&unmanaged) == kIOReturnSuccess,
+              let byProcess = unmanaged?.takeRetainedValue() as? [NSNumber: [[String: Any]]]
+        else { return false }
+        let displayTypes = [kIOPMAssertionTypePreventUserIdleDisplaySleep, kIOPMAssertionTypeNoDisplaySleep]
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        return byProcess.contains { pid, assertions in
+            pid.int32Value != ownPID && assertions.contains {
+                displayTypes.contains($0[kIOPMAssertionTypeKey] as? String ?? "")
+            }
+        }
     }
 }
 

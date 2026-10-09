@@ -69,7 +69,7 @@ enum SleepSetting {
 
     static func setDisabled(_ disabled: Bool) throws {
         try runAsRoot(disabled ? .disableSleep : .allowSleep)
-        Log.lidAwake.info("disablesleep=\(disabled)")
+        Log.keepAwake.info("disablesleep=\(disabled)")
     }
 
     static func sleepNow() throws {
