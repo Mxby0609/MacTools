@@ -160,7 +160,7 @@ private final class HotKey {
         }, 1, &eventType, context, &handlerRef)
         guard status == noErr else { throw RegistrationFailed(status: status) }
 
-        let id = EventHotKeyID(signature: OSType(0x4C49_4441), id: 1) // "LIDA"
+        let id = EventHotKeyID(signature: OSType(0x4D41_4354), id: 1) // "MACT"
         status = RegisterEventHotKey(UInt32(keyCode), UInt32(modifiers), id, GetApplicationEventTarget(), 0, &hotKeyRef)
         guard status == noErr else { throw RegistrationFailed(status: status) }
     }

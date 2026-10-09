@@ -4,7 +4,7 @@ import IOKit
 import IOKit.ps
 import os
 
-let log = Logger(subsystem: "local.mxby.lidawake", category: "main")
+let log = Logger(subsystem: "local.mxby.mactools", category: "main")
 
 struct CommandError: LocalizedError {
     let command: String

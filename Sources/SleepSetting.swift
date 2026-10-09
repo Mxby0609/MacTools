@@ -10,7 +10,7 @@ enum SleepSetting {
         var errorDescription: String? { "授权失败：\(message)" }
     }
 
-    static let sudoersPath = "/etc/sudoers.d/lidawake"
+    static let sudoersPath = "/etc/sudoers.d/mactools"
 
     static var isAuthorized: Bool {
         FileManager.default.fileExists(atPath: sudoersPath)

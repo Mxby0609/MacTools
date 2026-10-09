@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func updateIcon() {
         let name = controller.lastError != nil ? "exclamationmark.triangle"
             : controller.enabled ? "cup.and.saucer.fill" : "cup.and.saucer"
-        let image = NSImage(systemSymbolName: name, accessibilityDescription: "合盖运行")
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: "Mac 小工具")
         image?.isTemplate = true
         statusItem.button?.image = image
     }
