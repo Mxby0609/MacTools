@@ -8,7 +8,9 @@ enum SleepSetting {
 
     struct AuthorizationFailed: LocalizedError {
         let message: String
-        var errorDescription: String? { "授权失败：\(message)" }
+        var errorDescription: String? {
+            "授权失败：\(message)"
+        }
     }
 
     struct CommandError: LocalizedError {
@@ -27,9 +29,9 @@ enum SleepSetting {
 
         var arguments: [String] {
             switch self {
-            case .allowSleep: return ["-a", "disablesleep", "0"]
-            case .disableSleep: return ["-a", "disablesleep", "1"]
-            case .sleepNow: return ["sleepnow"]
+            case .allowSleep: ["-a", "disablesleep", "0"]
+            case .disableSleep: ["-a", "disablesleep", "1"]
+            case .sleepNow: ["sleepnow"]
             }
         }
     }
@@ -54,7 +56,8 @@ enum SleepSetting {
         /usr/sbin/chown root:wheel "$f" && /bin/chmod 0440 "$f" && /bin/mv "$f" \(sudoersPath)
         """
         let escaped = shell.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
-        let source = "do shell script \"\(escaped)\" with prompt \"合盖运行需要修改系统睡眠设置的权限（只需授权一次）。\" with administrator privileges"
+        let prompt = "合盖运行需要修改系统睡眠设置的权限（只需授权一次）。"
+        let source = "do shell script \"\(escaped)\" with prompt \"\(prompt)\" with administrator privileges"
         var errorInfo: NSDictionary?
         NSAppleScript(source: source)?.executeAndReturnError(&errorInfo)
         guard let errorInfo else { return }

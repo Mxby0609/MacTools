@@ -30,7 +30,9 @@ final class LidAwake {
         defaults.register(defaults: [Key.batteryThreshold: 30])
     }
 
-    var enabled: Bool { defaults.bool(forKey: Key.enabled) }
+    var enabled: Bool {
+        defaults.bool(forKey: Key.enabled)
+    }
 
     var allowOnBattery: Bool {
         get { defaults.bool(forKey: Key.allowOnBattery) }
@@ -44,12 +46,16 @@ final class LidAwake {
 
     private var keepsAwake: Bool {
         guard enabled else { return false }
-        if power.onAC { return true }
+        if power.onAC {
+            return true
+        }
         return allowOnBattery && (power.batteryPercent ?? 0) >= batteryThreshold
     }
 
     var statusText: String {
-        if let lastError { return "出错：\(lastError)" }
+        if let lastError {
+            return "出错：\(lastError)"
+        }
         guard enabled else { return "已关闭" }
         let source = power.onAC ? "插电中" : "电池 \(power.batteryPercent ?? 0)%"
         return keepsAwake ? "\(source)，合盖继续运行" : "\(source)，合盖会睡眠"
@@ -107,7 +113,9 @@ final class LidAwake {
         defer { onChange?() }
         let closed = lid.isClosed
         // 放在总开关判断之前：盖子合着时关掉功能，屏幕亮度可能没恢复成，开盖后在这里补上。
-        if !closed { restoreLights() }
+        if !closed {
+            restoreLights()
+        }
         guard enabled else { return }
         let keep = keepsAwake
         do {
@@ -116,7 +124,7 @@ final class LidAwake {
                 appliedSleepDisabled = keep
             }
             lastError = nil
-            if closed && keep {
+            if closed, keep {
                 dimLights()
             } else if closed {
                 // 合盖期间电量跌破阈值或拔掉电源：系统不会因为设置改变而自动睡，需要主动让它睡。
@@ -169,7 +177,7 @@ final class LidAwake {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             guard let self, !self.isDimmed, !self.lid.isClosed else { return }
-            self.restoreDisplay(attemptsLeft: attemptsLeft - 1)
+            restoreDisplay(attemptsLeft: attemptsLeft - 1)
         }
     }
 

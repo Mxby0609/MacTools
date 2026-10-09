@@ -14,9 +14,9 @@ final class WindowCentering {
 
         var errorDescription: String? {
             switch self {
-            case .noWindow: return "前台软件没有可移动的窗口"
-            case .fullScreen: return "窗口处于全屏状态"
-            case .notMoved: return "窗口没有按要求移动"
+            case .noWindow: "前台软件没有可移动的窗口"
+            case .fullScreen: "窗口处于全屏状态"
+            case .notMoved: "窗口没有按要求移动"
             }
         }
     }
@@ -31,10 +31,14 @@ final class WindowCentering {
     /// 启动时注册快捷键失败的原因。此时开关仍是打开的，菜单靠它提示功能没有生效。
     private(set) var lastError: String?
 
-    var enabled: Bool { defaults.bool(forKey: Self.enabledKey) }
+    var enabled: Bool {
+        defaults.bool(forKey: Self.enabledKey)
+    }
 
     /// 移动其他软件的窗口必须有辅助功能权限。重新编译安装后签名改变，系统会把之前的授权作废。
-    var needsPermission: Bool { enabled && !AXIsProcessTrusted() }
+    var needsPermission: Bool {
+        enabled && !AXIsProcessTrusted()
+    }
 
     func start() {
         guard enabled else { return }
@@ -58,7 +62,8 @@ final class WindowCentering {
     }
 
     func openPermissionSettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+        let url = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        NSWorkspace.shared.open(URL(string: url)!)
     }
 
     private func register() throws {
@@ -68,7 +73,8 @@ final class WindowCentering {
     }
 
     private func requestPermission() {
-        _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
     }
 
     private func handleHotKey() {
@@ -92,7 +98,8 @@ final class WindowCentering {
 
         var windowRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
-              let windowRef, CFGetTypeID(windowRef) == AXUIElementGetTypeID() else {
+              let windowRef, CFGetTypeID(windowRef) == AXUIElementGetTypeID()
+        else {
             throw CenterError.noWindow
         }
         let window = windowRef as! AXUIElement
@@ -112,7 +119,8 @@ final class WindowCentering {
         // 全屏、被软件自己固定位置的窗口会返回成功却不移动，所以读回位置核实。
         guard AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, targetValue) == .success,
               let moved = position(of: window),
-              abs(moved.x - target.x) <= 1, abs(moved.y - target.y) <= 1 else {
+              abs(moved.x - target.x) <= 1, abs(moved.y - target.y) <= 1
+        else {
             throw CenterError.notMoved
         }
     }
@@ -139,13 +147,15 @@ final class WindowCentering {
 
     private static func position(of window: AXUIElement) -> CGPoint? {
         var point = CGPoint.zero
-        guard let value = axValue(of: window, kAXPositionAttribute), AXValueGetValue(value, .cgPoint, &point) else { return nil }
+        guard let value = axValue(of: window, kAXPositionAttribute),
+              AXValueGetValue(value, .cgPoint, &point) else { return nil }
         return point
     }
 
     private static func size(of window: AXUIElement) -> CGSize? {
         var size = CGSize.zero
-        guard let value = axValue(of: window, kAXSizeAttribute), AXValueGetValue(value, .cgSize, &size) else { return nil }
+        guard let value = axValue(of: window, kAXSizeAttribute),
+              AXValueGetValue(value, .cgSize, &size) else { return nil }
         return size
     }
 
@@ -161,7 +171,9 @@ final class WindowCentering {
 private final class HotKey {
     struct RegistrationFailed: LocalizedError {
         let status: OSStatus
-        var errorDescription: String? { "注册快捷键失败（错误码 \(status)），可能已被其他软件占用" }
+        var errorDescription: String? {
+            "注册快捷键失败（错误码 \(status)），可能已被其他软件占用"
+        }
     }
 
     private let action: () -> Void
@@ -185,7 +197,11 @@ private final class HotKey {
     }
 
     deinit {
-        if let hotKeyRef { UnregisterEventHotKey(hotKeyRef) }
-        if let handlerRef { RemoveEventHandler(handlerRef) }
+        if let hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+        }
+        if let handlerRef {
+            RemoveEventHandler(handlerRef)
+        }
     }
 }

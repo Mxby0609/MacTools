@@ -6,7 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let windowCentering = WindowCentering()
     private var statusItem: NSStatusItem!
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    func applicationDidFinishLaunching(_: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let menu = NSMenu()
         menu.delegate = self
@@ -17,7 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         windowCentering.start()
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
+    func applicationWillTerminate(_: Notification) {
         lidAwake.shutdown()
     }
 
@@ -53,7 +53,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(threshold)
         menu.addItem(.separator())
 
-        menu.addItem(item(windowCentering.menuTitle, #selector(toggleWindowCentering), checked: windowCentering.enabled))
+        menu.addItem(item(
+            windowCentering.menuTitle,
+            #selector(toggleWindowCentering),
+            checked: windowCentering.enabled
+        ))
         if let error = windowCentering.lastError {
             menu.addItem(note("出错：\(error)"))
         }

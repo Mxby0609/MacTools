@@ -24,7 +24,12 @@ final class LidMonitor {
     }
 
     var isClosed: Bool {
-        let value = IORegistryEntryCreateCFProperty(rootDomain, kAppleClamshellStateKey as CFString, kCFAllocatorDefault, 0)
+        let value = IORegistryEntryCreateCFProperty(
+            rootDomain,
+            kAppleClamshellStateKey as CFString,
+            kCFAllocatorDefault,
+            0
+        )
         return (value?.takeRetainedValue() as? Bool) ?? false
     }
 
@@ -33,12 +38,19 @@ final class LidMonitor {
         port = IONotificationPortCreate(kIOMainPortDefault)
         IONotificationPortSetDispatchQueue(port, .main)
         let context = Unmanaged.passUnretained(self).toOpaque()
-        let result = IOServiceAddInterestNotification(port, rootDomain, kIOGeneralInterest, { context, _, messageType, _ in
-            guard messageType == clamshellStateChangeMessage, let context else { return }
-            let monitor = Unmanaged<LidMonitor>.fromOpaque(context).takeUnretainedValue()
-            log.notice("合盖状态变化：closed=\(monitor.isClosed)")
-            monitor.onChange?()
-        }, context, &notifier)
+        let result = IOServiceAddInterestNotification(
+            port,
+            rootDomain,
+            kIOGeneralInterest,
+            { context, _, messageType, _ in
+                guard messageType == clamshellStateChangeMessage, let context else { return }
+                let monitor = Unmanaged<LidMonitor>.fromOpaque(context).takeUnretainedValue()
+                log.notice("合盖状态变化：closed=\(monitor.isClosed)")
+                monitor.onChange?()
+            },
+            context,
+            &notifier
+        )
         if result != KERN_SUCCESS {
             log.error("注册合盖通知失败：\(result)")
         }
@@ -91,9 +103,14 @@ enum DisplayBrightness {
     private typealias GetFunction = @convention(c) (CGDirectDisplayID, UnsafeMutablePointer<Float>) -> Int32
     private typealias SetFunction = @convention(c) (CGDirectDisplayID, Float) -> Int32
 
-    private static let handle = dlopen("/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices", RTLD_NOW)
-    private static let getFunction = dlsym(handle, "DisplayServicesGetBrightness").map { unsafeBitCast($0, to: GetFunction.self) }
-    private static let setFunction = dlsym(handle, "DisplayServicesSetBrightness").map { unsafeBitCast($0, to: SetFunction.self) }
+    private static let handle = dlopen(
+        "/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices",
+        RTLD_NOW
+    )
+    private static let getFunction = dlsym(handle, "DisplayServicesGetBrightness")
+        .map { unsafeBitCast($0, to: GetFunction.self) }
+    private static let setFunction = dlsym(handle, "DisplayServicesSetBrightness")
+        .map { unsafeBitCast($0, to: SetFunction.self) }
 
     /// 合盖后内置屏可能已经下线，此时返回 nil。
     private static func builtinDisplay() -> CGDirectDisplayID? {
@@ -138,13 +155,15 @@ final class KeyboardBacklight {
             return nil
         }
         let client = type.init()
-        guard let ids = client.perform(NSSelectorFromString("copyKeyboardBacklightIDs"))?.takeRetainedValue() as? [NSNumber],
-              let first = ids.first else {
+        let selector = NSSelectorFromString("copyKeyboardBacklightIDs")
+        guard let ids = client.perform(selector)?.takeRetainedValue() as? [NSNumber],
+              let first = ids.first
+        else {
             log.error("读取键盘背光编号失败")
             return nil
         }
         self.client = client
-        self.keyboardID = first.uint64Value
+        keyboardID = first.uint64Value
     }
 
     func snapshot() -> Snapshot {
@@ -162,10 +181,14 @@ final class KeyboardBacklight {
         let setBrightness = unsafeBitCast(client.method(for: brightnessSel), to: SetBrightness.self)
         let setAuto = unsafeBitCast(client.method(for: autoSel), to: SetAuto.self)
         // 先关自动调节再设亮度，否则关灯后会被自动调节重新点亮；恢复时顺序相反。
-        if !snapshot.autoBrightness { _ = setAuto(client, autoSel, false, keyboardID) }
+        if !snapshot.autoBrightness {
+            _ = setAuto(client, autoSel, false, keyboardID)
+        }
         if !setBrightness(client, brightnessSel, snapshot.brightness, keyboardID) {
             log.error("设置键盘背光失败")
         }
-        if snapshot.autoBrightness { _ = setAuto(client, autoSel, true, keyboardID) }
+        if snapshot.autoBrightness {
+            _ = setAuto(client, autoSel, true, keyboardID)
+        }
     }
 }

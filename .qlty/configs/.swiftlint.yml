@@ -1,0 +1,6 @@
+# 这几条在本项目里只产生误报：系统对象的类型转换只能强制，on、x、y 这类短名字本身清楚，
+# 读命令输出时按 UTF-8 宽松解码就够用。
+disabled_rules:
+  - force_cast
+  - identifier_name
+  - optional_data_string_conversion
