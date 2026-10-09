@@ -2,38 +2,10 @@ import AppKit
 import CoreGraphics
 import IOKit
 import IOKit.ps
+import IOKit.pwr_mgt
 import os
 
-let log = Logger(subsystem: "local.mxby.mactools", category: "main")
-
-struct CommandError: LocalizedError {
-    let command: String
-    let status: Int32
-    let output: String
-
-    var errorDescription: String? {
-        "\(command) 退出码 \(status)：\(output.trimmingCharacters(in: .whitespacesAndNewlines))"
-    }
-}
-
-@discardableResult
-func runCommand(_ path: String, _ arguments: [String]) throws -> String {
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: path)
-    process.arguments = arguments
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    process.standardError = pipe
-    try process.run()
-    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-    process.waitUntilExit()
-    let output = String(decoding: data, as: UTF8.self)
-    guard process.terminationStatus == 0 else {
-        throw CommandError(command: ([path] + arguments).joined(separator: " "),
-                           status: process.terminationStatus, output: output)
-    }
-    return output
-}
+private let log = Log.lidAwake
 
 // MARK: - 合盖状态
 
@@ -52,7 +24,7 @@ final class LidMonitor {
     }
 
     var isClosed: Bool {
-        let value = IORegistryEntryCreateCFProperty(rootDomain, "AppleClamshellState" as CFString, kCFAllocatorDefault, 0)
+        let value = IORegistryEntryCreateCFProperty(rootDomain, kAppleClamshellStateKey as CFString, kCFAllocatorDefault, 0)
         return (value?.takeRetainedValue() as? Bool) ?? false
     }
 
@@ -176,25 +148,24 @@ final class KeyboardBacklight {
     }
 
     func snapshot() -> Snapshot {
-        let getSel = NSSelectorFromString("brightnessForKeyboard:")
+        let brightnessSel = NSSelectorFromString("brightnessForKeyboard:")
         let autoSel = NSSelectorFromString("isAutoBrightnessEnabledForKeyboard:")
-        let brightness = unsafeBitCast(client.method(for: getSel), to: GetBrightness.self)(client, getSel, keyboardID)
-        let auto = unsafeBitCast(client.method(for: autoSel), to: GetAuto.self)(client, autoSel, keyboardID)
-        return Snapshot(brightness: brightness, autoBrightness: auto)
+        let getBrightness = unsafeBitCast(client.method(for: brightnessSel), to: GetBrightness.self)
+        let getAuto = unsafeBitCast(client.method(for: autoSel), to: GetAuto.self)
+        return Snapshot(brightness: getBrightness(client, brightnessSel, keyboardID),
+                        autoBrightness: getAuto(client, autoSel, keyboardID))
     }
 
     func apply(_ snapshot: Snapshot) {
-        let setSel = NSSelectorFromString("setBrightness:forKeyboard:")
+        let brightnessSel = NSSelectorFromString("setBrightness:forKeyboard:")
         let autoSel = NSSelectorFromString("enableAutoBrightness:forKeyboard:")
+        let setBrightness = unsafeBitCast(client.method(for: brightnessSel), to: SetBrightness.self)
+        let setAuto = unsafeBitCast(client.method(for: autoSel), to: SetAuto.self)
         // 先关自动调节再设亮度，否则关灯后会被自动调节重新点亮；恢复时顺序相反。
-        if !snapshot.autoBrightness {
-            _ = unsafeBitCast(client.method(for: autoSel), to: SetAuto.self)(client, autoSel, false, keyboardID)
-        }
-        if !unsafeBitCast(client.method(for: setSel), to: SetBrightness.self)(client, setSel, snapshot.brightness, keyboardID) {
+        if !snapshot.autoBrightness { _ = setAuto(client, autoSel, false, keyboardID) }
+        if !setBrightness(client, brightnessSel, snapshot.brightness, keyboardID) {
             log.error("设置键盘背光失败")
         }
-        if snapshot.autoBrightness {
-            _ = unsafeBitCast(client.method(for: autoSel), to: SetAuto.self)(client, autoSel, true, keyboardID)
-        }
+        if snapshot.autoBrightness { _ = setAuto(client, autoSel, true, keyboardID) }
     }
 }

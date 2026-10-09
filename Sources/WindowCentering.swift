@@ -1,8 +1,11 @@
 import AppKit
 import ApplicationServices
 import Carbon.HIToolbox
+import os
 
-/// 按 ⌃⌥C 把当前窗口移到所在屏幕可用区域的正中，不改变窗口大小。
+private let log = Log.windowCentering
+
+/// 窗口居中：按 ⌃⌥C 把当前窗口移到所在屏幕可用区域的正中，不改变窗口大小。
 final class WindowCentering {
     private enum CenterError: LocalizedError {
         case noWindow
@@ -18,18 +21,29 @@ final class WindowCentering {
         }
     }
 
-    private static let enabledKey = "windowCentering"
+    private static let enabledKey = "windowCentering.enabled"
+
+    /// 菜单里的标题。其中的快捷键要和 register() 里注册的保持一致。
+    let menuTitle = "按 ⌃⌥C 居中当前窗口"
 
     private let defaults = UserDefaults.standard
     private var hotKey: HotKey?
+    /// 启动时注册快捷键失败的原因。此时开关仍是打开的，菜单靠它提示功能没有生效。
+    private(set) var lastError: String?
 
     var enabled: Bool { defaults.bool(forKey: Self.enabledKey) }
 
     /// 移动其他软件的窗口必须有辅助功能权限。重新编译安装后签名改变，系统会把之前的授权作废。
     var needsPermission: Bool { enabled && !AXIsProcessTrusted() }
 
-    func start() throws {
-        if enabled { try register() }
+    func start() {
+        guard enabled else { return }
+        do {
+            try register()
+        } catch {
+            lastError = error.localizedDescription
+            log.error("\(error.localizedDescription)")
+        }
     }
 
     func setEnabled(_ on: Bool) throws {
@@ -39,20 +53,25 @@ final class WindowCentering {
         } else {
             hotKey = nil
         }
+        lastError = nil
         defaults.set(on, forKey: Self.enabledKey)
+    }
+
+    func openPermissionSettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 
     private func register() throws {
         hotKey = try HotKey(keyCode: kVK_ANSI_C, modifiers: controlKey | optionKey) { [weak self] in
-            self?.centerFrontWindow()
+            self?.handleHotKey()
         }
     }
 
     private func requestPermission() {
-        _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
+        _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
     }
 
-    private func centerFrontWindow() {
+    private func handleHotKey() {
         guard AXIsProcessTrusted() else {
             requestPermission()
             return
@@ -60,7 +79,7 @@ final class WindowCentering {
         do {
             try Self.moveFrontWindowToCenter()
         } catch {
-            log.error("窗口居中失败：\(error.localizedDescription)")
+            log.error("居中失败：\(error.localizedDescription)")
             NSSound.beep()
         }
     }
