@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         let menu = NSMenu()
+        // 关掉自动启用，菜单项的 isEnabled 才会生效，例如没开无人操作调暗时，等待时长那一行是灰的。
+        menu.autoenablesItems = false
         menu.delegate = self
         statusItem.menu = menu
         keepAwake.onChange = { [weak self] in self?.updateIcon() }
@@ -47,6 +49,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             selected: keepAwake.idleSeconds,
             #selector(setIdleSeconds(_:))
         ))
+        let fade = item("逐渐调暗和恢复", #selector(toggleFade), checked: keepAwake.fadesGradually)
+        fade.isEnabled = keepAwake.enabled
+        menu.addItem(fade)
+        menu.addItem(item("调暗时音量也调到最低", #selector(toggleLowersVolume), checked: keepAwake.lowersVolume))
+        let pause = item("音量调到最低后暂停播放", #selector(togglePausesPlayback), checked: keepAwake.pausesPlayback)
+        pause.isEnabled = keepAwake.lowersVolume
+        menu.addItem(pause)
         menu.addItem(item("用电池时也运行", #selector(toggleBattery), checked: keepAwake.allowOnBattery))
         menu.addItem(choices(
             "电量低于 \(keepAwake.batteryThreshold)% 时允许睡眠",
@@ -127,6 +136,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func setIdleSeconds(_ sender: NSMenuItem) {
         keepAwake.idleSeconds = sender.tag
+    }
+
+    @objc private func toggleFade() {
+        keepAwake.fadesGradually.toggle()
+    }
+
+    @objc private func toggleLowersVolume() {
+        keepAwake.lowersVolume.toggle()
+    }
+
+    @objc private func togglePausesPlayback() {
+        keepAwake.pausesPlayback.toggle()
     }
 
     @objc private func toggleBattery() {

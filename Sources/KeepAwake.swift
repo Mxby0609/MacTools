@@ -3,13 +3,16 @@ import os
 
 private let log = Log.keepAwake
 
-/// 保持运行：合上盖子，或者开着盖子但一段时间无人操作时，不让电脑睡眠，并把屏幕亮度和键盘背光调到 0。
-/// 两种情况各有开关，共用电池设置。
+/// 保持运行：合上盖子，或者开着盖子但一段时间无人操作时，不让电脑睡眠，并调暗屏幕。
+/// 两种情况各有开关，共用电池设置。什么时候调暗由这里决定，怎么调暗见 Dimmer。
 final class KeepAwake {
     private enum Key {
         static let lidEnabled = "keepAwake.lidEnabled"
         static let idleEnabled = "keepAwake.idleEnabled"
         static let idleSeconds = "keepAwake.idleSeconds"
+        static let lowersVolume = "keepAwake.lowersVolume"
+        static let pausesPlayback = "keepAwake.pausesPlayback"
+        static let fadesGradually = "keepAwake.fadesGradually"
         static let allowOnBattery = "keepAwake.allowOnBattery"
         static let batteryThreshold = "keepAwake.batteryThreshold"
     }
@@ -21,18 +24,14 @@ final class KeepAwake {
     private let powerMonitor = PowerMonitor()
     private let idle = IdleMonitor()
     private let displaySleepBlocker = DisplaySleepBlocker()
-    private let keyboard = KeyboardBacklight()
+    private lazy var dimmer = Dimmer(lid: lid)
     private var power = PowerState.current()
     private var appliedSleepDisabled: Bool?
-    private var isDimmed = false
-    /// 调暗前的屏幕亮度，一直保留到恢复成功。开盖后内置屏还没上线就又合盖时，
-    /// 读到的亮度已经是 0，所以不能重新读取。
-    private var savedBrightness: Float?
-    private var savedKeyboard: KeyboardBacklight.Snapshot?
     private(set) var lastError: String?
 
     init() {
-        defaults.register(defaults: [Key.batteryThreshold: 30, Key.idleSeconds: 300])
+        defaults.register(defaults: [Key.batteryThreshold: 30, Key.idleSeconds: 300, Key.fadesGradually: true,
+                                     Key.pausesPlayback: true])
     }
 
     var lidEnabled: Bool {
@@ -48,6 +47,24 @@ final class KeepAwake {
     var idleSeconds: Int {
         get { defaults.integer(forKey: Key.idleSeconds) }
         set { defaults.set(newValue, forKey: Key.idleSeconds); reconcile() }
+    }
+
+    /// 调暗时是否把音量也调到 0。合盖和无人操作两种调暗都适用。
+    var lowersVolume: Bool {
+        get { defaults.bool(forKey: Key.lowersVolume) }
+        set { defaults.set(newValue, forKey: Key.lowersVolume) }
+    }
+
+    /// 音量调到最低后是否暂停正在播放的内容。只在 lowersVolume 打开时生效，恢复时不会自动继续播放。
+    var pausesPlayback: Bool {
+        get { defaults.bool(forKey: Key.pausesPlayback) }
+        set { defaults.set(newValue, forKey: Key.pausesPlayback) }
+    }
+
+    /// 是否逐渐调暗和恢复。合盖和无人操作两种情况都适用。
+    var fadesGradually: Bool {
+        get { defaults.bool(forKey: Key.fadesGradually) }
+        set { defaults.set(newValue, forKey: Key.fadesGradually) }
     }
 
     var allowOnBattery: Bool {
@@ -82,6 +99,7 @@ final class KeepAwake {
         lid.start { [weak self] in self?.reconcile() }
         powerMonitor.start { [weak self] in self?.refreshPower() }
         idle.onChange = { [weak self] in self?.reconcile() }
+        dimmer.onError = { [weak self] in self?.report($0) }
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             self?.refreshPower()
@@ -111,7 +129,7 @@ final class KeepAwake {
     /// 软件退出时调用：允许系统睡眠，但保留两个开关，下次启动继续生效。
     func shutdown() {
         guard lidEnabled else {
-            restoreLights()
+            dimmer.restore(gradually: false)
             return
         }
         restoreSystemState()
@@ -119,7 +137,7 @@ final class KeepAwake {
 
     /// 固定设回允许睡眠，不恢复开启前的值：那个值可能是别的软件临时设的禁止睡眠。
     private func restoreSystemState() {
-        restoreLights()
+        dimmer.restore(gradually: false)
         defer { onChange?() }
         do {
             try SleepSetting.setDisabled(false)
@@ -160,55 +178,13 @@ final class KeepAwake {
 
         // 盖子合着时不恢复：这时内置屏不在线，恢复不了，等开盖后再走到这里。
         if dim {
-            dimLights()
+            dimmer.dim(
+                gradually: fadesGradually,
+                lowersVolume: lowersVolume,
+                pausesPlayback: lowersVolume && pausesPlayback
+            )
         } else if !closed {
-            restoreLights()
-        }
-    }
-
-    /// 只调亮度，不让屏幕熄灭：熄屏会触发锁屏，远程桌面也会看到锁屏界面。
-    private func dimLights() {
-        guard !isDimmed else { return }
-        isDimmed = true
-        if savedBrightness == nil {
-            if let brightness = DisplayBrightness.get(), DisplayBrightness.set(0) {
-                savedBrightness = brightness
-            } else {
-                log.error("调低屏幕亮度失败")
-            }
-        }
-        if let keyboard {
-            savedKeyboard = keyboard.snapshot()
-            keyboard.apply(.init(brightness: 0, autoBrightness: false))
-        }
-        log.notice("屏幕亮度和键盘背光已调到 0")
-    }
-
-    private func restoreLights() {
-        guard isDimmed || savedBrightness != nil else { return }
-        isDimmed = false
-        if let snapshot = savedKeyboard {
-            keyboard?.apply(snapshot)
-            savedKeyboard = nil
-        }
-        restoreDisplay(attemptsLeft: 10)
-        log.notice("已恢复屏幕和键盘背光")
-    }
-
-    /// 开盖后内置屏要过一会儿才重新上线，所以每 0.5 秒重试一次。
-    private func restoreDisplay(attemptsLeft: Int) {
-        guard let brightness = savedBrightness else { return }
-        if DisplayBrightness.set(brightness) {
-            savedBrightness = nil
-            return
-        }
-        guard attemptsLeft > 0 else {
-            report("恢复屏幕亮度失败：内置屏一直未就绪")
-            return
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            guard let self, !self.isDimmed, !self.lid.isClosed else { return }
-            restoreDisplay(attemptsLeft: attemptsLeft - 1)
+            dimmer.restore(gradually: fadesGradually)
         }
     }
 

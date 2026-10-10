@@ -1,4 +1,5 @@
 import AppKit
+import AudioToolbox
 import CoreGraphics
 import IOKit
 import IOKit.ps
@@ -191,6 +192,51 @@ final class DisplaySleepBlocker {
     }
 }
 
+// MARK: - 画面伽马
+
+/// 内置屏的伽马表。背光调到最低一档仍然看得见，再调到 0 会一下子全黑；
+/// 逐渐调暗时同时按比例压暗画面，才能平滑地暗到全黑。软件退出时系统会自动恢复伽马表。
+struct DisplayGamma {
+    private let display: CGDirectDisplayID
+    private let red: [CGGammaValue]
+    private let green: [CGGammaValue]
+    private let blue: [CGGammaValue]
+
+    /// 读取内置屏当前的伽马表，内置屏不在线时返回 nil。
+    static func current() -> DisplayGamma? {
+        guard let display = DisplayBrightness.builtinDisplay() else { return nil }
+        let capacity = CGDisplayGammaTableCapacity(display)
+        var red = [CGGammaValue](repeating: 0, count: Int(capacity))
+        var green = red
+        var blue = red
+        var count: UInt32 = 0
+        guard CGGetDisplayTransferByTable(display, capacity, &red, &green, &blue, &count) == .success else {
+            return nil
+        }
+        let used = Int(count)
+        return DisplayGamma(
+            display: display,
+            red: Array(red.prefix(used)),
+            green: Array(green.prefix(used)),
+            blue: Array(blue.prefix(used))
+        )
+    }
+
+    /// 按比例压暗画面，scale 为 1 时恢复原样。
+    func apply(scale: Float) {
+        let result = CGSetDisplayTransferByTable(
+            display,
+            UInt32(red.count),
+            red.map { $0 * scale },
+            green.map { $0 * scale },
+            blue.map { $0 * scale }
+        )
+        if result != .success {
+            log.error("设置伽马表失败：\(result.rawValue)")
+        }
+    }
+}
+
 // MARK: - 屏幕亮度（私有框架 DisplayServices）
 
 enum DisplayBrightness {
@@ -207,7 +253,7 @@ enum DisplayBrightness {
         .map { unsafeBitCast($0, to: SetFunction.self) }
 
     /// 合盖后内置屏可能已经下线，此时返回 nil。
-    private static func builtinDisplay() -> CGDirectDisplayID? {
+    static func builtinDisplay() -> CGDirectDisplayID? {
         var ids = [CGDirectDisplayID](repeating: 0, count: 16)
         var count: UInt32 = 0
         guard CGGetOnlineDisplayList(UInt32(ids.count), &ids, &count) == .success else { return nil }
@@ -223,6 +269,48 @@ enum DisplayBrightness {
     static func set(_ value: Float) -> Bool {
         guard let setFunction, let display = builtinDisplay() else { return false }
         return setFunction(display, value) == 0
+    }
+}
+
+// MARK: - 音量
+
+/// 系统默认输出设备的音量，取值 0～1。
+enum OutputVolume {
+    struct Snapshot {
+        let device: AudioObjectID
+        let volume: Float32
+    }
+
+    private static let volumeAddress = AudioObjectPropertyAddress(
+        mSelector: kAudioHardwareServiceDeviceProperty_VirtualMainVolume,
+        mScope: kAudioDevicePropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain
+    )
+
+    /// 输出设备没有音量调节时返回 nil，例如部分 HDMI 显示器。
+    static func current() -> Snapshot? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var device = AudioObjectID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device)
+            == noErr else { return nil }
+        address = volumeAddress
+        var volume: Float32 = 0
+        size = UInt32(MemoryLayout<Float32>.size)
+        guard AudioObjectGetPropertyData(device, &address, 0, nil, &size, &volume) == noErr else { return nil }
+        return Snapshot(device: device, volume: volume)
+    }
+
+    /// 设置指定设备的音量。恢复时用调低时记下的设备，期间换了耳机也不会调错。
+    static func set(_ volume: Float32, on device: AudioObjectID) -> Bool {
+        var address = volumeAddress
+        var value = volume
+        let size = UInt32(MemoryLayout<Float32>.size)
+        return AudioObjectSetPropertyData(device, &address, 0, nil, size, &value) == noErr
     }
 }
 
